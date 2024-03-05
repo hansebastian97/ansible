@@ -1,0 +1,9 @@
+---
+# - hosts: jenkins,prod
+#   roles:
+#   - node_exporter
+
+- hosts: monitor
+  roles:
+  # - prometheus 
+  - grafana

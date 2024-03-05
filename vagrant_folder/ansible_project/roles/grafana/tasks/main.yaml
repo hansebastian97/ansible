@@ -1,0 +1,95 @@
+---
+- name: Import variables
+  include_vars: ../vars/vars.yaml
+
+- name: Check if Grafana is downloaded
+  stat: "path=/etc/grafana"
+  register: grafana
+
+
+- name: install from apt
+  become: true
+  apt: 
+    deb: "{{ GRAFANA_URL }}"
+  when: not grafana.stat.exists
+  
+- name: Create folder
+  become: true
+  become_method: sudo
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: grafana
+    group: grafana
+  with_items:
+    - /etc/grafana/certs
+    - /etc/grafana/dashboards/node_exporter
+
+- name: Create certs
+  become: true
+  ansible.builtin.command: >
+    openssl req -x509 -nodes -newkey rsa:2048
+    -keyout /etc/grafana/certs/grafana.key \
+    -out /etc/grafana/certs/grafana.crt \
+    -days 3650 \
+    -subj "/CN=grafana.com"
+
+- name: Move grafana.ini files ke /etc/grafana/
+  become: true
+  ansible.builtin.template:
+    src: grafana.ini.j2
+    dest: /etc/grafana/grafana.ini
+    mode: '0664'
+    owner: grafana
+    group: grafana 
+
+
+- name: Move prometheus.yaml files ke /etc/grafana/provisioning
+  become: true
+  ansible.builtin.template:
+    src: prometheus.yaml.j2
+    dest: /etc/grafana/provisioning/datasources/prometheus.yaml
+    mode: '0664'
+    owner: grafana
+    group: grafana     
+
+- name: Move dashboards.yaml files ke /etc/grafana/dashboards
+  become: true
+  ansible.builtin.template:
+    src: dashboards.yaml.j2
+    dest: /etc/grafana/provisioning/dashboards/prometheus.yaml
+    mode: '0664'
+    owner: grafana
+    group: grafana   
+
+- name: Copy node_exporter.json to another host
+  become: true
+  ansible.builtin.copy:
+    src: ../templates/node_exporter.json
+    dest: /etc/grafana/dashboards/node_exporter/node_exporter.json
+    mode: '0664'
+    owner: grafana
+    group: grafana
+
+
+- name: Change owner and group recursely
+  become: true
+  ansible.builtin.file:
+    path: /etc/grafana
+    owner: grafana
+    group: grafana
+    recurse: yes
+
+- name: Start grafana-server Service
+  become: true
+  systemd:
+    state: started
+    name: grafana-server
+    enabled: yes
+
+- name: Restart prometheus Service
+  become: true
+  ansible.builtin.systemd:
+    name: grafana-server
+    state: restarted
+    enabled: yes    

@@ -1,0 +1,21 @@
+---
+- name: Extract Prometheus
+  become: true
+  ansible.builtin.unarchive:
+    remote_src: true
+    src: /home/vagrant/prometheus.tar.gz
+    dest: /home/vagrant/prometheus_file/
+
+- name: Start Prometheus daemon
+  become: true
+  ansible.builtin.systemd:
+    name: prometheus
+    state: restarted
+    enabled: yes
+
+- name: Restart prometheus Service
+  become: true
+  ansible.builtin.systemd:
+    name: prometheus
+    state: restarted
+    enabled: yes

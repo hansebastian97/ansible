@@ -1,0 +1,120 @@
+---
+- name: Import variables
+  include_vars: ../vars/vars.yaml
+
+- name: Check if node_exporter is installed
+  stat: "path=/usr/bin/node_exporter"
+  register: node_exporter_bin
+
+- name: Create group
+  become: true
+  become_method: sudo
+  ansible.builtin.group:
+    name: node_exporter
+    state: present
+  when: not node_exporter_bin.stat.exists
+
+- name: Create user
+  become: true
+  become_method: sudo
+  ansible.builtin.user:
+    name: node_exporter
+    group: node_exporter
+    shell: /bin/false
+    create_home: false
+  when: not node_exporter_bin.stat.exists
+
+- name: Create folder
+  become: true
+  become_method: sudo
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: node_exporter
+    group: node_exporter
+  with_items:
+    - /etc/node_exporter/
+    - /home/vagrant/node_exporter_file/
+  when: not node_exporter_bin.stat.exists
+
+- name: Download Node Exporter
+  ansible.builtin.get_url:
+    url: "{{ node_exporter_url }}"
+    dest: /home/vagrant/node_exporter.tar.gz
+  when: not node_exporter_bin.stat.exists
+
+- name: Extract Node Exporter
+  become: true
+  ansible.builtin.unarchive:
+    remote_src: true
+    src: /home/vagrant/node_exporter.tar.gz
+    dest: /home/vagrant/node_exporter_file/
+  when: not node_exporter_bin.stat.exists
+  register: node_exporter_unarchive
+  
+
+- name: Remove tar file
+  ansible.builtin.file:
+    path: /home/vagrant/node_exporter.tar.gz
+    state: absent
+  when: (node_exporter_unarchive.changed) and (not node_exporter_bin.stat.exists)
+
+- name: Move Node Exporter to /usr/lib
+  become: true
+  ansible.builtin.shell: 
+    cmd: sudo cp /home/vagrant/node_exporter_file/node_exporter*/node_exporter /usr/bin/node_exporter
+  args:
+    executable: /bin/bash
+  when: not node_exporter_bin.stat.exists
+
+- name: Change node_exporter ownership
+  become: true
+  ansible.builtin.file:
+    path: /usr/bin/node_exporter
+    owner: node_exporter
+    group: node_exporter
+    state: file
+  when: not node_exporter_bin.stat.exists
+
+# - name: Move certificates and web-config to /etc/node_exporter
+#   become: true
+#   ansible.builtin.template:
+#     src: "{{ item }}"
+#     dest: /etc/node_exporter/
+#     mode: '0664'
+#     owner: node_exporter
+#     group: node_exporter
+#   with_items:
+#     - node_exporter.crt
+#     - node_exporter.key
+#     - web-config.yaml
+#   when: not node_exporter_bin.stat.exists
+  
+- name: Create Node Service
+  become: true
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /usr/lib/systemd/system/node_exporter.service
+    mode: '0664'
+    owner: node_exporter
+    group: node_exporter
+
+- name: Reload daemon
+  become: true
+  ansible.builtin.systemd:
+    name: node_exporter
+    daemon_reload: yes
+
+- name: Start Node Exporter
+  become: true
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: started
+    enabled: yes
+
+- name: Restart Node Exporter Service
+  become: true
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: restarted
+    enabled: yes

@@ -1,0 +1,7 @@
+{% for host in groups['apps'] %}
+- targets:
+  - {{ hostvars[host]['ansible_host'] }}:9200
+  labels:
+    node: {{ hostvars[host]["inventory_hostname"] }}
+    job: node_exporter
+{% endfor %}

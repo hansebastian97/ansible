@@ -1,0 +1,185 @@
+---
+- name: Check if Prometheus is downloaded
+  stat: "path=/home/vagrant/prometheus.tar.gz"
+  register: prometheus_tar
+
+- name: Check if Prometheus service is created
+  stat: "path=/etc/systemd/system/prometheus.service"
+  register: prometheus_service
+
+
+# - name: Print file status
+#   debug:
+#     var: prometheus_tar.stat.exists
+
+
+- name: Import variables
+  include_vars: ../vars/vars.yaml
+  
+- name: Create prometheus group
+  become: true
+  become_method: sudo
+  ansible.builtin.group:
+    name: prometheus
+    state: present
+
+- name: Create user
+  become: true
+  become_method: sudo
+  ansible.builtin.user:
+    name: prometheus
+    group: prometheus
+    shell: /bin/false
+    create_home: false
+
+- name: Create folder
+  become: true
+  become_method: sudo
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: prometheus
+    group: prometheus
+  with_items:
+    - "{{ PROMETHEUS_CONFIG_DIR }}/"
+    - "{{ PROMETHEUS_CONFIG_DIR }}/certs/prometheus.com/"
+    - /var/lib/prometheus/   
+    - /home/vagrant/prometheus_file/
+  # when: not prometheus_file.stat.exists
+
+- name: Download Prometheus
+  become: true
+  become_method: sudo
+  ansible.builtin.get_url:
+    url: "{{ PROMETHEUS_URL }}"
+    dest: /home/vagrant/prometheus.tar.gz
+    owner: prometheus
+    group: prometheus
+  when: not prometheus_tar.stat.exists
+  register: prometheus_unarchive
+
+- name: Extract Prometheus
+  become: true
+  ansible.builtin.unarchive:
+    remote_src: true
+    src: /home/vagrant/prometheus.tar.gz
+    dest: /home/vagrant/prometheus_file/
+  when: prometheus_unarchive.changed
+    
+# - name: Remove tar file
+#   ansible.builtin.file:
+#     path: /home/vagrant/prometheus.tar.gz
+#     state: absent
+#   when: prometheus_unarchive.changed
+
+- name: Move Prometheus file to /prometheus_file
+  become: true
+  ansible.builtin.shell: 
+    cmd: sudo mv /home/vagrant/prometheus_file/prometheus*/* /home/vagrant/prometheus_file
+  args:
+    executable: /bin/bash
+  when: prometheus_unarchive.changed
+
+- name: Move prometheus and promtool ke /etc/prometheus
+  become: true
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ PROMETHEUS_LOCAL_DIR }}/"
+    owner: prometheus
+    group: prometheus
+    mode: '0700'
+    remote_src: true
+  with_items:
+    - /home/vagrant/prometheus_file/prometheus
+    - /home/vagrant/prometheus_file/promtool
+  # when: prometheus_service.changed
+
+- name: Move configuration files ke /etc/prometheus/
+  become: true
+  ansible.builtin.template:
+    src: prometheus.yaml.j2
+    dest: /etc/prometheus/prometheus.yaml
+    mode: '0664'
+    owner: prometheus
+    group: prometheus
+  # when: prometheus_unarchive.changed
+
+- name: Copy config prometheus target
+  become: true
+  ansible.builtin.template:
+    src: targets.yaml.j2
+    dest: /etc/prometheus/targets.yaml   
+    mode: '0664'
+    owner: prometheus
+    group: prometheus
+
+- name: Move folders ke /etc/prometheus
+  become: true
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ item }}"
+    dest: "{{ PROMETHEUS_CONFIG_DIR }}/"
+    owner: prometheus
+    group: prometheus
+    directory_mode: yes
+  with_items:
+    - /home/vagrant/prometheus_file/consoles/
+    - /home/vagrant/prometheus_file/console_libraries/
+
+- name: Create certs
+  become: true
+  ansible.builtin.command: >
+    openssl req -x509 -nodes -newkey rsa:2048
+    -keyout /etc/prometheus/certs/prometheus.com/prometheus.com.key \
+    -out /etc/prometheus/certs/prometheus.com/prometheus.com.crt \
+    -days 3650
+    -subj "/CN=prometheus.com"
+
+- name: Change owner and group of certificate 
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: prometheus
+    group: prometheus
+    state: touch
+  with_items:
+    - /etc/prometheus/certs/prometheus.com/prometheus.com.key
+    - /etc/prometheus/certs/prometheus.com/prometheus.com.crt
+
+- name: Move web-config files ke /etc/prometheus/
+  become: true
+  ansible.builtin.template:
+    src: web-config.yaml.j2
+    dest: /etc/prometheus/web-config.yaml
+    mode: '0664'
+    owner: prometheus
+    group: prometheus 
+
+- name: Create serviced
+  become: true
+  ansible.builtin.template:
+    src: prometheus.service.j2
+    dest: /etc/systemd/system/prometheus.service
+    mode: '0664'
+    owner: prometheus
+    group: prometheus    
+
+- name: Reload daemon
+  become: true
+  ansible.builtin.systemd:
+    name: prometheus
+    daemon_reload: yes
+
+- name: Start Prometheus daemon
+  become: true
+  ansible.builtin.systemd:
+    name: prometheus
+    state: started
+    enabled: yes
+
+- name: Restart prometheus Service
+  become: true
+  ansible.builtin.systemd:
+    name: prometheus
+    state: restarted
+    enabled: yes
